@@ -1,3 +1,5 @@
+import type { RevisionState } from './revision'
+
 export type Vec3 = [number, number, number]
 export type ObjectType = 'box' | 'sphere' | 'cylinder' | 'cone' | 'torus' | 'plane' | 'directionalLight' | 'pointLight' | 'spotLight' | 'camera'
 export type TransformMode = 'translate' | 'rotate' | 'scale'
@@ -29,10 +31,12 @@ export interface SceneObject {
 }
 
 export interface SceneDocument {
-  version: 1
+  version: 2
   name: string
   objects: SceneObject[]
   savedAt: string
+  /** v2 起携带修订信息；旧文件没有，导入时先迁移兼容 */
+  revision?: RevisionState
 }
 
 export interface PerformanceSettings {

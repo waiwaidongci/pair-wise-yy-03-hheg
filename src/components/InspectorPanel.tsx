@@ -12,9 +12,10 @@ import {
   Typography,
 } from '@mui/material'
 import { AlignHorizontalCenter, ContentCopyOutlined, DeleteOutline } from '@mui/icons-material'
+import { useMemo } from 'react'
 import type { SceneObject, Vec3 } from '../types/scene'
 import { useEditorStore } from '../stores/editor'
-import { TYPE_LABELS } from '../utils/scene'
+import { TYPE_LABELS, descendantsOf } from '../utils/scene'
 
 function VectorEditor({ label, value, onChange }: { label: string; value: Vec3; onChange: (value: Vec3) => void }) {
   return (
@@ -47,6 +48,11 @@ export default function InspectorPanel() {
   const remove = useEditorStore((state) => state.remove)
   const duplicate = useEditorStore((state) => state.duplicate)
   const align = useEditorStore((state) => state.align)
+  const reparent = useEditorStore((state) => state.reparent)
+  const invalidParents = useMemo(
+    () => (object ? new Set([object.id, ...descendantsOf(object.id, objects)]) : new Set<string>()),
+    [object, objects],
+  )
   if (!object) {
     return <aside className="panel inspector-panel"><Typography variant="subtitle2">属性检查器</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>在层级树或视口中选择对象。</Typography></aside>
   }
@@ -57,9 +63,9 @@ export default function InspectorPanel() {
       <div className="panel-heading"><div><Typography variant="subtitle2">属性检查器</Typography><Typography variant="caption" color="text.secondary">{TYPE_LABELS[object.type]} · {object.id}</Typography></div></div>
       <Stack spacing={1.2}>
         <TextField label="对象名称" size="small" value={object.name} onChange={(event) => patch({ name: event.target.value })} />
-        <TextField select label="父级对象" size="small" value={object.parentId ?? ''} onChange={(event) => patch({ parentId: event.target.value || null })}>
+        <TextField select label="父级对象" size="small" value={object.parentId ?? ''} onChange={(event) => reparent(object.id, event.target.value || null)}>
           <MenuItem value="">场景根节点</MenuItem>
-          {objects.filter((item) => item.id !== object.id).map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
+          {objects.filter((item) => !invalidParents.has(item.id)).map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
         </TextField>
         <VectorEditor label="位置 Position" value={object.position} onChange={(position) => patch({ position })} />
         <VectorEditor label="旋转 Rotation" value={object.rotation} onChange={(rotation) => patch({ rotation })} />
