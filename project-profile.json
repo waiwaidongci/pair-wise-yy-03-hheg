@@ -1,0 +1,11 @@
+{
+  "projectId": "pair-wise-yy-03",
+  "projectName": "SceneForge 浏览器三维场景编辑器",
+  "category": "三维可视化",
+  "businessDomain": "研发工具",
+  "projectForm": "完整项目",
+  "codeScope": "frontend",
+  "languages": "React, TypeScript, Three.js, React Three Fiber, Drei, Zustand, MUI, Leva, Vite",
+  "summary": "浏览器内三维场景编辑器，支持层级树、变换控件、材质编辑、吸附对齐与场景 JSON 存取。",
+  "containerized": false
+}
