@@ -13,7 +13,7 @@ function ObjectRow({ object, depth }: { object: SceneObject; depth: number }) {
   const reparent = useEditorStore((state) => state.reparent)
   const [expanded, setExpanded] = useState(true)
   const objects = useEditorStore((state) => state.objects)
-  const children = useMemo(() => objects.filter((item) => item.parentId === object.id), [objects, object.id])
+  const children = useMemo(() => objects.filter((item) => !item.deleted && item.parentId === object.id), [objects, object.id])
   const isLight = object.type.includes('Light')
   const isCamera = object.type === 'camera'
 
@@ -69,13 +69,14 @@ export default function HierarchyPanel() {
   const objects = useEditorStore((state) => state.objects)
   const selectedId = useEditorStore((state) => state.selectedId)
   const add = useEditorStore((state) => state.add)
-  const roots = objects.filter((object) => !object.parentId)
-  const countGeometry = objects.filter((object) => !object.type.includes('Light') && object.type !== 'camera').length
+  const live = objects.filter((object) => !object.deleted)
+  const roots = live.filter((object) => !object.parentId)
+  const countGeometry = live.filter((object) => !object.type.includes('Light') && object.type !== 'camera').length
 
   return (
     <aside className="panel hierarchy-panel">
       <div className="panel-heading">
-        <div><Typography variant="subtitle2">场景层级</Typography><Typography variant="caption" color="text.secondary">{objects.length} 个对象 · {countGeometry} 个几何体</Typography></div>
+        <div><Typography variant="subtitle2">场景层级</Typography><Typography variant="caption" color="text.secondary">{live.length} 个对象 · {countGeometry} 个几何体</Typography></div>
       </div>
       <Stack direction="row" spacing={0.5} sx={{ mb: 1, flexWrap: 'wrap' }}>
         {(['box', 'sphere', 'cylinder', 'cone', 'torus'] as ObjectType[]).map((type) => (

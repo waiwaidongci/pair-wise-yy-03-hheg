@@ -13,6 +13,7 @@ import {
 } from '@mui/material'
 import {
   CloudDownloadOutlined,
+  CloudSyncOutlined,
   CloudUploadOutlined,
   OpenWithOutlined,
   RotateRightOutlined,
@@ -21,16 +22,23 @@ import {
   SpeedOutlined,
   UndoOutlined,
 } from '@mui/icons-material'
-import { useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import HierarchyPanel from '../components/HierarchyPanel'
 import InspectorPanel from '../components/InspectorPanel'
 import SceneViewport from '../components/SceneViewport'
+import MergeDialog from '../components/MergeDialog'
+import ExportPreviewDialog from '../components/ExportPreviewDialog'
 import { useEditorStore } from '../stores/editor'
 import type { SceneDocument, TransformMode } from '../types/scene'
+import { computeWorldBounds, liveObjects } from '../utils/scene'
 
 export default function EditorView() {
   const store = useEditorStore()
-  const selectedObject = store.objects.find((item) => item.id === store.selectedId)
+  const selectedObject = store.objects.find((item) => item.id === store.selectedId && !item.deleted)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [mergeFile, setMergeFile] = useState<File | null>(null)
+  const liveCount = liveObjects(store.objects).length
+  const bounds = useMemo(() => computeWorldBounds(store.objects), [store.objects, store.sceneRevision])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -49,8 +57,19 @@ export default function EditorView() {
     return () => window.removeEventListener('keydown', onKeyDown)
   })
 
+  function buildDocument(): SceneDocument {
+    return {
+      version: 2,
+      name: store.name,
+      objects: store.objects,
+      savedAt: new Date().toISOString(),
+      revision: store.revision,
+      base: store.baseObjects,
+    }
+  }
+
   function exportScene() {
-    const document: SceneDocument = { version: 1, name: store.name, objects: store.objects, savedAt: new Date().toISOString() }
+    const document = buildDocument()
     const blob = new Blob([JSON.stringify(document, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const anchor = window.document.createElement('a')
@@ -58,7 +77,7 @@ export default function EditorView() {
     anchor.download = `${store.name}.scene.json`
     anchor.click()
     URL.revokeObjectURL(url)
-    store.noticeMessage('场景 JSON 已保存')
+    store.noticeMessage('场景 JSON 已保存（v2 修订格式）')
   }
 
   async function importScene(file: File) {
@@ -69,6 +88,20 @@ export default function EditorView() {
     } catch (error) {
       store.noticeMessage(error instanceof Error ? error.message : '场景文件无效')
     }
+  }
+
+  async function mergeScene(file: File) {
+    setMergeFile(file)
+    try {
+      const document = JSON.parse(await file.text())
+      store.mergeSceneDocument(document, file.name)
+    } catch (error) {
+      store.mergeFailed(error instanceof Error ? error.message : '场景文件无效')
+    }
+  }
+
+  function retryMerge() {
+    if (mergeFile) mergeScene(mergeFile)
   }
 
   const modes: Array<{ value: TransformMode; label: string; icon: React.ReactNode }> = [
@@ -118,7 +151,13 @@ export default function EditorView() {
             导入
             <input hidden type="file" accept=".json" onChange={(event) => event.target.files?.[0] && importScene(event.target.files[0])} />
           </Button>
-          <Button size="small" startIcon={<CloudDownloadOutlined />} onClick={exportScene}>导出</Button>
+          <Tooltip title="与当前场景做离线三方合并：只改一边直接采用，同字段双方都改则冲突裁决，删除不回退">
+            <Button size="small" component="label" startIcon={<CloudSyncOutlined />}>
+              导入合并
+              <input hidden type="file" accept=".json" onChange={(event) => event.target.files?.[0] && mergeScene(event.target.files[0])} />
+            </Button>
+          </Tooltip>
+          <Button size="small" startIcon={<CloudDownloadOutlined />} onClick={() => setPreviewOpen(true)}>导出预览</Button>
           <Button size="small" variant="contained" startIcon={<SaveOutlined />} onClick={exportScene}>保存场景</Button>
         </Toolbar>
       </AppBar>
@@ -129,10 +168,18 @@ export default function EditorView() {
       </main>
       <div className="statusbar">
         <span>{selectedObject ? `已选择：${selectedObject.name}` : '未选择对象'}</span>
-        <span>对象 {store.objects.length} · 位置 {selectedObject?.position.map((item) => item.toFixed(2)).join(' / ') ?? '--'}</span>
+        <span>对象 {liveCount} · 修订 R{store.revision} · 位置 {selectedObject?.position.map((item) => item.toFixed(2)).join(' / ') ?? '--'}</span>
+        <span>
+          世界包围盒{' '}
+          {bounds
+            ? `${(bounds.max.x - bounds.min.x).toFixed(2)} × ${(bounds.max.y - bounds.min.y).toFixed(2)} × ${(bounds.max.z - bounds.min.z).toFixed(2)}`
+            : '--'}
+        </span>
         <span>{store.performance.instanceMode ? 'InstancedMesh 批量渲染' : '独立对象渲染'}</span>
       </div>
       <Snackbar open={Boolean(store.notice)} autoHideDuration={2600} onClose={() => store.noticeMessage('')} message={store.notice} />
+      <MergeDialog onRetry={retryMerge} />
+      <ExportPreviewDialog open={previewOpen} onClose={() => setPreviewOpen(false)} />
     </Box>
   )
 }

@@ -59,7 +59,7 @@ export default function InspectorPanel() {
         <TextField label="对象名称" size="small" value={object.name} onChange={(event) => patch({ name: event.target.value })} />
         <TextField select label="父级对象" size="small" value={object.parentId ?? ''} onChange={(event) => patch({ parentId: event.target.value || null })}>
           <MenuItem value="">场景根节点</MenuItem>
-          {objects.filter((item) => item.id !== object.id).map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
+          {objects.filter((item) => !item.deleted && item.id !== object.id).map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
         </TextField>
         <VectorEditor label="位置 Position" value={object.position} onChange={(position) => patch({ position })} />
         <VectorEditor label="旋转 Rotation" value={object.rotation} onChange={(rotation) => patch({ rotation })} />

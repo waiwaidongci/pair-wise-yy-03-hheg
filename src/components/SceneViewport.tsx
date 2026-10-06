@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type { SceneObject } from '../types/scene'
 import { useEditorStore } from '../stores/editor'
-import { isGeometry, TYPE_LABELS, worldMatrix } from '../utils/scene'
+import { isGeometry, TYPE_LABELS, computeWorldBounds, worldMatrix } from '../utils/scene'
 import Geometry from './Geometry'
 
 interface Registry {
@@ -99,7 +99,7 @@ function CameraObject({ object, registry }: { object: SceneObject; registry: Reg
 }
 
 function ObjectView({ object, objects, registry }: { object: SceneObject; objects: SceneObject[]; registry: Registry }) {
-  const children = objects.filter((item) => item.parentId === object.id)
+  const children = objects.filter((item) => !item.deleted && item.parentId === object.id)
   if (isGeometry(object.type) || object.parentId) {
     return (
       <group position={object.position} rotation={object.rotation} scale={object.scale}>
@@ -200,12 +200,12 @@ function InstanceBatch({ type, objects, registry }: { type: SceneObject['type'];
 function InstancedScene({ objects, registry }: { objects: SceneObject[]; registry: Registry }) {
   const batches = useMemo(() => {
     const map = new Map<SceneObject['type'], SceneObject[]>()
-    objects.filter((object) => isGeometry(object.type) && object.visible).forEach((object) => {
+    objects.filter((object) => !object.deleted && isGeometry(object.type) && object.visible).forEach((object) => {
       map.set(object.type, [...(map.get(object.type) ?? []), object])
     })
     return [...map.entries()]
   }, [objects])
-  const singleObjects = objects.filter((object) => !isGeometry(object.type) && !object.parentId)
+  const singleObjects = objects.filter((object) => !object.deleted && !isGeometry(object.type) && !object.parentId)
   return (
     <>
       {batches.map(([type, batch]) => <InstanceBatch key={type} type={type} objects={batch} registry={registry} />)}
@@ -216,18 +216,21 @@ function InstancedScene({ objects, registry }: { objects: SceneObject[]; registr
 
 function SceneContent({ registry }: { registry: Registry }) {
   const objects = useEditorStore((state) => state.objects)
+  const sceneRevision = useEditorStore((state) => state.sceneRevision)
   const performance = useEditorStore((state) => state.performance)
   const showGrid = performance.showGrid
+  const bounds = useMemo(() => computeWorldBounds(objects), [objects, sceneRevision])
   return (
     <>
       <color attach="background" args={['#cdd7e5']} />
       <fog attach="fog" args={['#cdd7e5', 18, 55]} />
       <ambientLight intensity={0.7} />
       {showGrid && <Grid infiniteGrid cellSize={0.5} sectionSize={2.5} fadeDistance={32} sectionColor="#7b8da5" cellColor="#b5c0cf" />}
+      {bounds && <box3Helper args={[bounds, '#2563eb']} />}
       {performance.instanceMode ? (
         <InstancedScene objects={objects} registry={registry} />
       ) : (
-        objects.filter((object) => !object.parentId).map((object) => <ObjectView key={object.id} object={object} objects={objects} registry={registry} />)
+        objects.filter((object) => !object.deleted && !object.parentId).map((object) => <ObjectView key={object.id} object={object} objects={objects} registry={registry} />)
       )}
       {!performance.instanceMode && <SelectionControls registry={registry} />}
     </>

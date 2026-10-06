@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { ObjectType, SceneObject, Vec3 } from '../types/scene'
+import type { MaterialSpec, ObjectType, SceneDocument, SceneObject, Vec3 } from '../types/scene'
 
 export const GEOMETRY_TYPES: ObjectType[] = ['box', 'sphere', 'cylinder', 'cone', 'torus', 'plane']
 export const LIGHT_TYPES: ObjectType[] = ['directionalLight', 'pointLight', 'spotLight']
@@ -41,6 +41,7 @@ export function createSceneObject(type: ObjectType, parentId: string | null = nu
     type,
     parentId,
     visible: true,
+    rev: 1,
     position: [0, type === 'plane' ? 0 : 0.8, 0],
     rotation: [0, 0, 0],
     scale: [1, 1, 1],
@@ -157,4 +158,106 @@ export function descendantsOf(id: string, objects: SceneObject[]) {
 
 export function clonePosition(position: Vec3): Vec3 {
   return [position[0], position[1], position[2]]
+}
+
+export function liveObjects(objects: SceneObject[]): SceneObject[] {
+  return objects.filter((object) => !object.deleted)
+}
+
+// ---- 旧场景迁移 ----
+
+const VALID_TYPES = new Set<ObjectType>([...GEOMETRY_TYPES, ...LIGHT_TYPES, 'camera'])
+
+function migrateObject(raw: unknown): SceneObject {
+  if (typeof raw !== 'object' || raw === null) throw new Error('场景对象格式无效')
+  const o = raw as Partial<SceneObject>
+  if (typeof o.id !== 'string' || o.id.length === 0) throw new Error('场景对象缺少 id')
+  const material: Partial<MaterialSpec> = o.material ?? {}
+  return {
+    id: o.id,
+    name: typeof o.name === 'string' ? o.name : '未命名对象',
+    type: typeof o.type === 'string' && VALID_TYPES.has(o.type as ObjectType) ? (o.type as ObjectType) : 'box',
+    parentId: o.parentId ?? null,
+    visible: o.visible ?? true,
+    position: Array.isArray(o.position) ? (o.position as Vec3) : [0, 0.8, 0],
+    rotation: Array.isArray(o.rotation) ? (o.rotation as Vec3) : [0, 0, 0],
+    scale: Array.isArray(o.scale) ? (o.scale as Vec3) : [1, 1, 1],
+    castShadow: o.castShadow ?? true,
+    receiveShadow: o.receiveShadow ?? true,
+    material: {
+      color: typeof material.color === 'string' ? material.color : '#94a3b8',
+      roughness: typeof material.roughness === 'number' ? material.roughness : 0.45,
+      metalness: typeof material.metalness === 'number' ? material.metalness : 0.05,
+      opacity: typeof material.opacity === 'number' ? material.opacity : 1,
+      wireframe: material.wireframe ?? false,
+    },
+    intensity: typeof o.intensity === 'number' ? o.intensity : undefined,
+    distance: typeof o.distance === 'number' ? o.distance : undefined,
+    fov: typeof o.fov === 'number' ? o.fov : undefined,
+    activeCamera: o.activeCamera ?? undefined,
+    // 旧版本对象没有修订信息：补 rev=1，作为迁移后的共同祖先
+    rev: typeof o.rev === 'number' && Number.isFinite(o.rev) ? o.rev : 1,
+    deleted: o.deleted === true,
+  }
+}
+
+/**
+ * 把读入的场景文件迁移为带修订信息的 v2 文档。
+ * 旧版 v1 文件缺少 rev/base，迁移后其自身即作为合并基准。
+ */
+export function migrateDocument(input: unknown): SceneDocument {
+  if (typeof input !== 'object' || input === null) throw new Error('场景文件无效：不是 JSON 对象')
+  const doc = input as Partial<SceneDocument>
+  if (!Array.isArray(doc.objects)) throw new Error('场景文件无效：缺少 objects 数组')
+  const objects = doc.objects.map((raw) => migrateObject(raw))
+  const base = Array.isArray(doc.base) ? doc.base.map((raw) => migrateObject(raw)) : objects
+  return {
+    version: 2,
+    name: typeof doc.name === 'string' && doc.name.length > 0 ? doc.name : '未命名展台',
+    objects,
+    savedAt: typeof doc.savedAt === 'string' ? doc.savedAt : new Date().toISOString(),
+    revision: typeof doc.revision === 'number' && Number.isFinite(doc.revision) ? doc.revision : 1,
+    base,
+  }
+}
+
+// ---- 世界包围盒 ----
+
+function localBounds(type: ObjectType): THREE.Box3 {
+  switch (type) {
+    case 'box':
+      return new THREE.Box3(new THREE.Vector3(-0.6, -0.6, -0.6), new THREE.Vector3(0.6, 0.6, 0.6))
+    case 'sphere':
+      return new THREE.Box3(new THREE.Vector3(-0.65, -0.65, -0.65), new THREE.Vector3(0.65, 0.65, 0.65))
+    case 'cylinder':
+      return new THREE.Box3(new THREE.Vector3(-0.52, -0.55, -0.52), new THREE.Vector3(0.52, 0.55, 0.52))
+    case 'cone':
+      return new THREE.Box3(new THREE.Vector3(-0.62, -0.6, -0.62), new THREE.Vector3(0.62, 0.6, 0.62))
+    case 'torus':
+      return new THREE.Box3(new THREE.Vector3(-0.85, -0.85, -0.2), new THREE.Vector3(0.85, 0.85, 0.2))
+    case 'plane':
+      return new THREE.Box3(new THREE.Vector3(-0.5, -0.5, 0), new THREE.Vector3(0.5, 0.5, 0))
+    default:
+      // 灯光 / 相机的辅助标识
+      return new THREE.Box3(new THREE.Vector3(-0.12, -0.12, -0.12), new THREE.Vector3(0.12, 0.12, 0.12))
+  }
+}
+
+/** 计算当前场景所有存活对象的世界空间包围盒；无对象时返回 null */
+export function computeWorldBounds(objects: SceneObject[]): THREE.Box3 | null {
+  const cache = new Map<string, THREE.Matrix4>()
+  const result = new THREE.Box3()
+  let hasContent = false
+  for (const object of objects) {
+    if (object.deleted) continue
+    const world = worldMatrix(object.id, objects, cache)
+    const box = localBounds(object.type).clone().applyMatrix4(world)
+    if (!hasContent) {
+      result.copy(box)
+      hasContent = true
+    } else {
+      result.union(box)
+    }
+  }
+  return hasContent ? result : null
 }

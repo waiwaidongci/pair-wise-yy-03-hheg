@@ -26,13 +26,21 @@ export interface SceneObject {
   distance?: number
   fov?: number
   activeCamera?: boolean
+  /** 本地修订号：每次字段变更自增，用于离线编辑后的三方合并 */
+  rev: number
+  /** 墓碑标记：对象已被删除，合并时阻止旧文件将其带回 */
+  deleted?: boolean
 }
 
 export interface SceneDocument {
-  version: 1
+  version: 1 | 2
   name: string
   objects: SceneObject[]
   savedAt: string
+  /** 文档修订号，随每次结构变更自增 */
+  revision?: number
+  /** 共同祖先快照：离线三方合并的基准，导出时嵌入文件 */
+  base?: SceneObject[]
 }
 
 export interface PerformanceSettings {
